@@ -262,23 +262,38 @@ function getRemainingMs(seat) {
 }
 
 function normalizePnulSeat(roomId, seat, fetchedAt) {
-  const available =
-    seat.showReservationButton === true ||
-    seat.isReservable === true ||
-    (seat.isOccupied === false && seat.isUnavailable !== true && seat.isDisabled !== true);
+  const unavailable = seat.isActive === false || seat.isUnavailable === true || seat.isDisabled === true;
+  const occupied = seat.isOccupied === true;
+  const reservable = seat.isReservable ?? seat.showReservationButton;
+  const available = !unavailable && !occupied && (
+    reservable === true || (reservable == null && seat.isOccupied === false)
+  );
+  const cooldown = !unavailable && seat.isOccupied === false && reservable === false;
+  const status = unavailable ? "unavailable" : occupied ? "occupied" : available ? "available" : cooldown ? "cooldown" : "unknown";
+  const statusLabel = {
+    unavailable: "사용 불가",
+    occupied: "사용중",
+    available: "사용 가능",
+    cooldown: "반납 후 대기",
+    unknown: "조회됨",
+  }[status];
   const remainingMsFromApi = getRemainingMs(seat);
-  const expiresAtDate = available
-    ? fetchedAt
-    : remainingMsFromApi !== null
-      ? new Date(fetchedAt.getTime() + remainingMsFromApi)
-      : findTimeValue(seat);
-  const remainingMs = available
-    ? 0
-    : remainingMsFromApi !== null
-      ? remainingMsFromApi
-      : expiresAtDate
-        ? Math.max(0, expiresAtDate.getTime() - Date.now())
-        : null;
+  const expiresAtDate = cooldown || unavailable
+    ? null
+    : available
+      ? fetchedAt
+      : remainingMsFromApi !== null
+        ? new Date(fetchedAt.getTime() + remainingMsFromApi)
+        : findTimeValue(seat);
+  const remainingMs = cooldown || unavailable
+    ? null
+    : available
+      ? 0
+      : remainingMsFromApi !== null
+        ? remainingMsFromApi
+        : expiresAtDate
+          ? Math.max(0, expiresAtDate.getTime() - Date.now())
+          : null;
   const seatNo = firstDefined(
     seat.no,
     seat.seatNo,
@@ -294,18 +309,22 @@ function normalizePnulSeat(roomId, seat, fetchedAt) {
     roomNo: roomId,
     roomName: REAL_ROOMS.get(roomId) ?? `열람실 ${roomId}`,
     seatNo,
-    status: available ? "available" : seat.isOccupied ? "occupied" : "unknown",
-    statusLabel: available ? "사용 가능" : seat.isOccupied ? "사용중" : "조회됨",
+    status,
+    statusLabel,
     expiresAt: expiresAtDate?.toISOString() ?? null,
     fetchedAt: fetchedAt.toISOString(),
     remainingMinutes: Number.isFinite(Number(seat.remainingTime)) ? Number(seat.remainingTime) : null,
     remainingMs,
     raw: {
+      isActive: seat.isActive,
+      isUnavailable: seat.isUnavailable,
+      isDisabled: seat.isDisabled,
       isOccupied: seat.isOccupied,
       isReservable: seat.isReservable,
       showReservationButton: seat.showReservationButton,
       remainingTime: seat.remainingTime,
       chargeTime: seat.chargeTime,
+      seatChargeState: seat.seatChargeState,
     },
   };
 }

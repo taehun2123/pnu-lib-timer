@@ -249,6 +249,19 @@ button:disabled {
   background: #f4fbf6;
 }
 
+.seat-row.cooldown {
+  border-color: rgba(179, 107, 18, 0.35);
+  background: #fff9ee;
+}
+
+.seat-row.cooldown .time-cell strong {
+  color: var(--warn);
+}
+
+.seat-row.unavailable .time-cell strong {
+  color: var(--muted);
+}
+
 .seat-meta {
   display: grid;
   gap: 5px;

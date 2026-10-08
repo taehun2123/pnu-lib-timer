@@ -1,5 +1,7 @@
 const STORAGE_KEY = "pnusear-seat-time-settings";
 const DEFAULT_ROOMS = "새벽벌도서관 2층 1열람실, 새벽별당";
+const RETURN_COOLDOWN_MS = 25000;
+const COOLDOWN_RETRY_MS = 5000;
 
 const settingsForm = document.querySelector("#settings-form");
 const roomsInput = document.querySelector("#rooms");
@@ -17,6 +19,10 @@ let settings = readSettings();
 let latestSeats = [];
 let autoRefreshTimer = null;
 let liveRenderTimer = null;
+let cooldownRefreshTimer = null;
+let isFetchingSeats = false;
+let cooldownRefreshPending = false;
+let isPageActive = true;
 
 function readSettings() {
   try {
@@ -71,6 +77,10 @@ function formatRemaining(ms) {
 }
 
 function getCurrentRemainingMs(seat) {
+  if (seat.status === "cooldown") {
+    return Date.parse(seat.cooldownUntil) - Date.now();
+  }
+
   if (seat.expiresAt) {
     const expiresAt = new Date(seat.expiresAt).getTime();
     if (Number.isFinite(expiresAt)) {
@@ -115,9 +125,26 @@ function compareSeats(left, right) {
   return compareSeatNumber(left, right);
 }
 
+function getOfficialRemainingMinutes(seat) {
+  const value = seat.remainingMinutes ?? seat.raw?.remainingTime;
+  if (value == null || String(value).trim() === "") {
+    return null;
+  }
+
+  const remainingMinutes = Number(value);
+  return Number.isFinite(remainingMinutes) && remainingMinutes >= 0 ? remainingMinutes : null;
+}
+
 function getOfficialTimeLabel(seat) {
-  const remainingMinutes = Number(seat.remainingMinutes ?? seat.raw?.remainingTime);
-  if (Number.isFinite(remainingMinutes) && remainingMinutes >= 0) {
+  if (seat.status === "cooldown") {
+    return "공식값 예약 불가";
+  }
+  if (seat.status === "unavailable") {
+    return "공식값 사용 불가";
+  }
+
+  const remainingMinutes = getOfficialRemainingMinutes(seat);
+  if (remainingMinutes !== null) {
     return `공식값 ${remainingMinutes}분`;
   }
 
@@ -152,9 +179,12 @@ function renderSeatList() {
   for (const seat of [...latestSeats].sort(compareSeats)) {
     const remainingMs = getCurrentRemainingMs(seat);
     const isAvailable = seat.status === "available";
+    const isCooldown = seat.status === "cooldown";
+    const isUnavailable = seat.status === "unavailable";
+    const cooldownFinished = isCooldown && remainingMs <= 0;
 
     const row = document.createElement("div");
-    row.className = `seat-row ${isAvailable ? "available" : ""}`;
+    row.className = `seat-row ${isAvailable ? "available" : isCooldown ? "cooldown" : isUnavailable ? "unavailable" : ""}`;
 
     const meta = document.createElement("div");
     meta.className = "seat-meta";
@@ -165,13 +195,18 @@ function renderSeatList() {
 
     const detail = document.createElement("div");
     detail.className = "seat-detail";
-    detail.textContent = [seat.statusLabel ?? "조회됨", getFetchedAtLabel(seat)].filter(Boolean).join(" · ");
+    const statusLabel = cooldownFinished ? "예약 가능 확인 중" : seat.statusLabel ?? "조회됨";
+    detail.textContent = [statusLabel, getFetchedAtLabel(seat)].filter(Boolean).join(" · ");
 
     const time = document.createElement("div");
     time.className = "time-cell";
 
     const remaining = document.createElement("strong");
-    remaining.textContent = isAvailable ? "사용 가능" : formatRemaining(remainingMs);
+    remaining.textContent = isAvailable
+      ? "사용 가능"
+      : isCooldown
+        ? cooldownFinished ? "예약 가능 확인 중" : `${formatRemaining(remainingMs)} 후 사용 가능 예상`
+        : isUnavailable ? "사용 불가" : formatRemaining(remainingMs);
 
     const official = document.createElement("span");
     official.textContent = getOfficialTimeLabel(seat);
@@ -198,7 +233,43 @@ function getRoomsValue() {
   return roomsInput.value.trim() || DEFAULT_ROOMS;
 }
 
+function getSeatKey(seat) {
+  return JSON.stringify([String(seat.roomNo), String(seat.id ?? seat.seatNo)]);
+}
+
+function reconcileSeats(nextSeats) {
+  const previousSeats = new Map(latestSeats.map((seat) => [getSeatKey(seat), seat]));
+
+  return nextSeats.map((seat) => {
+    const previousSeat = previousSeats.get(getSeatKey(seat));
+    if (seat.status === "cooldown") {
+      const cooldownUntil = previousSeat?.status === "cooldown" && Number.isFinite(Date.parse(previousSeat.cooldownUntil))
+        ? previousSeat.cooldownUntil
+        : new Date(Date.now() + RETURN_COOLDOWN_MS).toISOString();
+      return { ...seat, cooldownUntil };
+    }
+
+    const remainingMinutes = getOfficialRemainingMinutes(seat);
+    if (
+      !previousSeat ||
+      seat.status !== previousSeat.status ||
+      remainingMinutes === null ||
+      remainingMinutes !== getOfficialRemainingMinutes(previousSeat) ||
+      !previousSeat.expiresAt ||
+      !Number.isFinite(Date.parse(previousSeat.expiresAt))
+    ) {
+      return seat;
+    }
+
+    return { ...seat, expiresAt: previousSeat.expiresAt };
+  });
+}
+
 async function fetchSeats() {
+  if (isFetchingSeats || !isPageActive) {
+    return;
+  }
+  isFetchingSeats = true;
   const rooms = getRoomsValue();
   const params = new URLSearchParams({ rooms });
 
@@ -207,16 +278,48 @@ async function fetchSeats() {
 
   try {
     const data = await requestJson(`/api/seats?${params.toString()}`);
-    latestSeats = data.seats ?? [];
+    latestSeats = reconcileSeats(data.seats ?? []);
     renderSeatList();
     watchStatus.textContent = `마지막 조회: ${new Date().toLocaleTimeString("ko-KR")}`;
   } catch (error) {
-    latestSeats = [];
     renderSeatList();
     watchStatus.textContent = `조회 실패: ${error.message}`;
   } finally {
+    isFetchingSeats = false;
     refreshButton.disabled = false;
+    scheduleCooldownRefresh();
+    if (cooldownRefreshPending && isPageActive) {
+      cooldownRefreshPending = false;
+      fetchSeats();
+    }
   }
+}
+
+function scheduleCooldownRefresh() {
+  window.clearTimeout(cooldownRefreshTimer);
+  cooldownRefreshTimer = null;
+  if (!isPageActive) {
+    return;
+  }
+
+  const delays = latestSeats
+    .filter((seat) => seat.status === "cooldown")
+    .map((seat) => getCurrentRemainingMs(seat))
+    .filter(Number.isFinite)
+    .map((remainingMs) => remainingMs > 0 ? remainingMs : COOLDOWN_RETRY_MS);
+  if (delays.length === 0) {
+    return;
+  }
+
+  cooldownRefreshTimer = window.setTimeout(() => {
+    cooldownRefreshTimer = null;
+    renderSeatList();
+    if (isFetchingSeats) {
+      cooldownRefreshPending = true;
+    } else {
+      fetchSeats();
+    }
+  }, Math.min(...delays));
 }
 
 function scheduleAutoRefresh() {
@@ -283,6 +386,19 @@ scheduleAutoRefresh();
 liveRenderTimer = window.setInterval(renderSeatList, 1000);
 
 window.addEventListener("pagehide", () => {
+  isPageActive = false;
+  cooldownRefreshPending = false;
   window.clearInterval(autoRefreshTimer);
   window.clearInterval(liveRenderTimer);
+  window.clearTimeout(cooldownRefreshTimer);
+});
+
+window.addEventListener("pageshow", () => {
+  if (isPageActive) {
+    return;
+  }
+  isPageActive = true;
+  scheduleAutoRefresh();
+  liveRenderTimer = window.setInterval(renderSeatList, 1000);
+  fetchSeats();
 });

@@ -1,0 +1,12 @@
+{
+  "name": "pnusear",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "mock": "PNUSEAR_PROVIDER=mock node server.js",
+    "test": "node --test tests/*.test.js",
+    "probe": "node tools/probe-pnul.js",
+    "import-headers": "node tools/import-pnul-headers.js"
+  }
+}
