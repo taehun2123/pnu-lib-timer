@@ -4,11 +4,11 @@ const { URL } = require("node:url");
 
 const HOST = process.env.HOST ?? "127.0.0.1";
 const PORT = Number(process.env.PORT ?? 4173);
-const USE_MOCK = process.env.PNUSEAR_PROVIDER !== "real";
+const USE_MOCK = process.env.PNUSEAR_PROVIDER === "mock";
 const PNUL_BASE_URL = "https://lib.pusan.ac.kr/pyxis-api/1";
-const PNUL_COOKIE_FILE = process.env.PNUL_COOKIE_FILE;
-const PNUL_AUTH_TOKEN_FILE = process.env.PNUL_AUTH_TOKEN_FILE;
 const PRIVATE_DIR = `${__dirname}/private`;
+const PNUL_COOKIE_FILE = process.env.PNUL_COOKIE_FILE ?? `${PRIVATE_DIR}/pnul-cookie.txt`;
+const PNUL_AUTH_TOKEN_FILE = process.env.PNUL_AUTH_TOKEN_FILE ?? `${PRIVATE_DIR}/pnul-auth-token.txt`;
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -400,7 +400,7 @@ async function routeApi(request, response, url) {
           ? "REAL 조회 모드: PNUL 좌석 남은 시간 조회"
           : hasCookie
             ? "REAL 조회 모드: pyxis-auth-token 필요"
-            : "REAL 조회 모드: PNUL_COOKIE_FILE 또는 PNUL_COOKIE 필요",
+            : "REAL 조회 모드: 로그인 세션 저장 필요",
     });
     return;
   }
@@ -436,7 +436,7 @@ async function routeStatic(request, response, url) {
   const relativePath = url.pathname === "/" ? "/index.html" : url.pathname;
   const filePath = path.join(__dirname, path.normalize(relativePath));
 
-  if (!filePath.startsWith(__dirname)) {
+  if (!filePath.startsWith(__dirname) || filePath.toLowerCase().startsWith(PRIVATE_DIR.toLowerCase())) {
     response.writeHead(403);
     response.end("Forbidden");
     return;

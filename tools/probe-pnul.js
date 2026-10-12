@@ -3,8 +3,9 @@
 const fs = require("node:fs");
 
 const BASE_URL = "https://lib.pusan.ac.kr/pyxis-api/1";
-const COOKIE_FILE = process.env.PNUL_COOKIE_FILE;
-const AUTH_TOKEN_FILE = process.env.PNUL_AUTH_TOKEN_FILE;
+const PRIVATE_DIR = `${__dirname}/../private`;
+const COOKIE_FILE = process.env.PNUL_COOKIE_FILE ?? `${PRIVATE_DIR}/pnul-cookie.txt`;
+const AUTH_TOKEN_FILE = process.env.PNUL_AUTH_TOKEN_FILE ?? `${PRIVATE_DIR}/pnul-auth-token.txt`;
 const RAW_COOKIE = process.env.PNUL_COOKIE ?? readCookieFile(COOKIE_FILE);
 const COOKIE = normalizeCookie(RAW_COOKIE);
 const AUTHORIZATION = process.env.PNUL_AUTHORIZATION ?? "";

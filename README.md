@@ -44,8 +44,12 @@
 Node.js 18 이상이 필요합니다.
 
 ```bash
-PNUSEAR_PROVIDER=real PNUL_COOKIE_FILE=private/pnul-cookie.txt PNUL_AUTH_TOKEN_FILE=private/pnul-auth-token.txt node server.js
+npm start
 ```
+
+설치할 패키지는 없습니다. 서버는 `private/`의 세션 파일을 자동으로 읽습니다. 세션은 화면에서 저장한 직후 서버 재시작 없이 반영됩니다.
+
+실제 API 없이 화면만 확인하려면 `npm run mock`을 실행하십시오.
 
 브라우저에서 아래 주소를 엽니다.
 
@@ -69,14 +73,14 @@ private/pnul-cookie.txt
 private/pnul-auth-token.txt
 ```
 
-`private/`는 `.gitignore`에 포함되어 있어 커밋되지 않습니다.
+`private/`는 `.gitignore`에 포함되어 있어 커밋되지 않습니다. 서버는 `/private/` 경로 요청에 403을 응답합니다.
 
 ## CLI로 세션 저장
 
 브라우저 대신 파일로 저장하려면 Headers 내용을 `private/pnul-headers.txt`에 넣고 실행합니다.
 
 ```bash
-node tools/import-pnul-headers.js private/pnul-headers.txt
+npm run import-headers -- private/pnul-headers.txt
 ```
 
 ## API
@@ -94,7 +98,7 @@ POST /api/import-headers
 PNUL API 연결 상태를 터미널에서 직접 확인할 수 있습니다.
 
 ```bash
-PNUL_COOKIE_FILE=private/pnul-cookie.txt PNUL_AUTH_TOKEN_FILE=private/pnul-auth-token.txt node tools/probe-pnul.js
+npm run probe
 ```
 
 ## 동작 검사
@@ -104,6 +108,16 @@ PNUL_COOKIE_FILE=private/pnul-cookie.txt PNUL_AUTH_TOKEN_FILE=private/pnul-auth-
 ```bash
 npm test
 ```
+
+## 환경 변수
+
+| 변수 | 기본값 | 용도 |
+| --- | --- | --- |
+| `PORT` | `4173` | 서버 포트 |
+| `HOST` | `127.0.0.1` | 서버 바인딩 주소 |
+| `PNUSEAR_PROVIDER` | 실제 조회 | `mock` 지정 시 가짜 데이터 사용 |
+| `PNUL_COOKIE_FILE` | `private/pnul-cookie.txt` | Cookie 파일 경로 |
+| `PNUL_AUTH_TOKEN_FILE` | `private/pnul-auth-token.txt` | 인증 토큰 파일 경로 |
 
 ## 제외 좌석
 
