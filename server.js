@@ -264,28 +264,24 @@ function getRemainingMs(seat) {
 function normalizePnulSeat(roomId, seat, fetchedAt) {
   const unavailable = seat.isActive === false || seat.isUnavailable === true || seat.isDisabled === true;
   const occupied = seat.isOccupied === true;
-  const reservable = seat.isReservable ?? seat.showReservationButton;
-  const available = !unavailable && !occupied && (
-    reservable === true || (reservable == null && seat.isOccupied === false)
-  );
-  const cooldown = !unavailable && seat.isOccupied === false && reservable === false;
-  const status = unavailable ? "unavailable" : occupied ? "occupied" : available ? "available" : cooldown ? "cooldown" : "unknown";
+  // isReservable은 2026-10-15 조회에서 모든 좌석이 false여서 사용 가능 판단에 쓰지 않음
+  const available = !unavailable && seat.isOccupied === false;
+  const status = unavailable ? "unavailable" : occupied ? "occupied" : available ? "available" : "unknown";
   const statusLabel = {
     unavailable: "사용 불가",
     occupied: "사용중",
     available: "사용 가능",
-    cooldown: "반납 후 대기",
     unknown: "조회됨",
   }[status];
   const remainingMsFromApi = getRemainingMs(seat);
-  const expiresAtDate = cooldown || unavailable
+  const expiresAtDate = unavailable
     ? null
     : available
       ? fetchedAt
       : remainingMsFromApi !== null
         ? new Date(fetchedAt.getTime() + remainingMsFromApi)
         : findTimeValue(seat);
-  const remainingMs = cooldown || unavailable
+  const remainingMs = unavailable
     ? null
     : available
       ? 0

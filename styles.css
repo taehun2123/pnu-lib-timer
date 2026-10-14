@@ -220,6 +220,10 @@ button:disabled {
   font-weight: 800;
 }
 
+.seat-filter {
+  margin-bottom: 16px;
+}
+
 .seat-list {
   display: grid;
   gap: 10px;

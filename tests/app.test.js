@@ -113,6 +113,13 @@ async function createApp(initialSeats, refreshIntervalMs = 10000) {
       return release;
     },
     requestCount() { return requestCount; },
+    filter(value) {
+      const input = elements.get("#seat-filter");
+      input.value = value;
+      input.dispatch("input");
+    },
+    seatCount() { return elements.get("#seat-count").textContent; },
+    emptyText() { return elements.get("#seat-list").children[0].textContent; },
     hide() { windowListeners.get("pagehide")(); },
     show() { windowListeners.get("pageshow")(); },
     rows() {
@@ -172,14 +179,6 @@ test("좌석 ID가 없는 응답도 같은 열람실의 좌석 번호로 구분�
   ]);
 });
 
-test("사용 가능 상태로 바뀌거나 다시 사용 중이 되면 새 상태를 반영합니다", async () => {
-  const app = await createApp([{ remainingMinutes: 5 }]);
-  await app.refresh([{ status: "available", remainingMinutes: 5 }]);
-  assert.equal(app.rows()[0].time, "사용 가능");
-  await app.refresh([{ remainingMinutes: 5 }]);
-  assert.equal(app.rows()[0].time, "5분 00초");
-});
-
 test("처음 조회되거나 목록에서 사라졌다 다시 나타난 좌석은 새 타이머를 사용합니다", async () => {
   const app = await createApp([{ remainingMinutes: 5 }]);
   await app.refresh([{ seatNo: 121, remainingMinutes: 5 }]);
@@ -209,111 +208,81 @@ test("초 단위 타이머가 끝나도 공식 분 값이 같으면 다시 시�
   assert.equal(app.rows()[0].time, "2분 00초");
 });
 
-const cooldownSeat = { status: "cooldown", statusLabel: "반납 후 대기", remainingMinutes: 0 };
+const availableSeat = { status: "available", statusLabel: "사용 가능", remainingMinutes: 0 };
 
-test("반납 대기 25초가 새로고침 후에도 이어지고 종료 시 바로 예약 가능 여부를 조회합니다", async () => {
+test("처음 조회한 빈 좌석은 반납 대기 없이 사용 가능으로 표시합니다", async () => {
+  const app = await createApp([availableSeat], 0);
+  assert.equal(app.rows()[0].time, "사용 가능");
+  assert.equal(app.rows()[0].official, "공식값 사용 가능");
+  assert.equal(app.rows()[0].className, "seat-row available");
+  await app.refresh([availableSeat]);
+  assert.equal(app.rows()[0].time, "사용 가능");
+});
+
+test("사용 중 좌석이 비면 25초 반납 대기 후 사용 가능으로 바뀝니다", async () => {
   const app = await createApp([{ remainingMinutes: 5 }], 0);
-  await app.refresh([cooldownSeat]);
+  await app.refresh([availableSeat]);
   assert.equal(app.rows()[0].time, "25초 후 사용 가능 예상");
-  assert.equal(app.rows()[0].official, "공식값 예약 불가");
+  assert.match(app.rows()[0].detail, /^반납 후 대기 · /);
   assert.equal(app.rows()[0].className, "seat-row cooldown");
-  await app.refresh([cooldownSeat]);
+  await app.refresh([availableSeat]);
   assert.equal(app.rows()[0].time, "15초 후 사용 가능 예상");
 
-  app.setResponse([{ status: "available", remainingMinutes: 0 }]);
   app.tick(15000);
-  assert.equal(app.rows()[0].time, "예약 가능 확인 중");
-  await app.flush();
-  assert.equal(app.requestCount(), 4);
   assert.equal(app.rows()[0].time, "사용 가능");
   assert.equal(app.rows()[0].className, "seat-row available");
-});
-
-test("25초가 지나도 공식값이 예약 불가이면 확인 중 상태를 유지하고 재조회합니다", async () => {
-  const app = await createApp([cooldownSeat], 0);
-  app.tick(25000);
-  await app.flush();
-  assert.equal(app.rows()[0].time, "예약 가능 확인 중");
-  assert.equal(app.rows()[0].official, "공식값 예약 불가");
-  assert.equal(app.requestCount(), 2);
-  app.setResponse([{ status: "available", remainingMinutes: 0 }]);
-  app.tick(5000);
-  await app.flush();
+  await app.refresh([availableSeat]);
   assert.equal(app.rows()[0].time, "사용 가능");
-  assert.equal(app.requestCount(), 3);
+  assert.equal(app.requestCount(), 4);
 });
 
-test("25초 이전에 공식 예약 가능 상태가 확인되면 즉시 반영합니다", async () => {
-  const app = await createApp([cooldownSeat], 0);
-  await app.refresh([{ status: "available", remainingMinutes: 0 }]);
-  assert.equal(app.rows()[0].time, "사용 가능");
-  app.tick(25000);
-  await app.flush();
-  assert.equal(app.requestCount(), 2);
-});
-
-test("대기 중 다른 사용자가 좌석을 사용하면 사용 시간으로 전환합니다", async () => {
-  const app = await createApp([cooldownSeat], 0);
+test("반납 대기 중 다른 사용자가 좌석을 사용하면 사용 시간으로 바뀝니다", async () => {
+  const app = await createApp([{ remainingMinutes: 5 }], 0);
+  await app.refresh([availableSeat]);
   await app.refresh([{ remainingMinutes: 10 }]);
   assert.equal(app.rows()[0].time, "10분 00초");
-  app.tick(25000);
-  await app.flush();
-  assert.equal(app.requestCount(), 2);
-  assert.equal(app.rows()[0].time, "9분 35초");
-});
-
-test("사용 불가 좌석에는 반납 대기 타이머를 시작하지 않습니다", async () => {
-  const app = await createApp([{ status: "unavailable", statusLabel: "사용 불가", remainingMinutes: 0 }], 0);
-  assert.equal(app.rows()[0].time, "사용 불가");
-  assert.equal(app.rows()[0].official, "공식값 사용 불가");
-  app.tick(30000);
-  await app.flush();
-  assert.equal(app.requestCount(), 1);
 });
 
 test("조회가 실패해도 반납 대기 타이머는 초기화되지 않습니다", async () => {
-  const app = await createApp([cooldownSeat], 0);
+  const app = await createApp([{ remainingMinutes: 5 }], 0);
+  await app.refresh([availableSeat]);
   app.failNextRequest();
-  await app.refresh([cooldownSeat]);
+  await app.refresh([availableSeat]);
   assert.equal(app.rows()[0].time, "15초 후 사용 가능 예상");
-  await app.refresh([cooldownSeat]);
-  assert.equal(app.rows()[0].time, "5초 후 사용 가능 예상");
 });
 
-test("진행 중인 조회가 있으면 대기 종료 조회를 그 다음에 수행합니다", async () => {
-  const app = await createApp([cooldownSeat], 0);
-  const release = app.deferNextRequest();
-  await app.refresh([cooldownSeat], 24000);
-  app.setResponse([{ status: "available", remainingMinutes: 0 }]);
-  app.tick(1000);
-  assert.equal(app.requestCount(), 2);
-  release();
-  await app.flush();
-  assert.equal(app.requestCount(), 3);
-  assert.equal(app.rows()[0].time, "사용 가능");
+test("사용 불가 좌석은 사용 불가로 표시합니다", async () => {
+  const app = await createApp([{ status: "unavailable", statusLabel: "사용 불가", remainingMinutes: 0 }], 0);
+  assert.equal(app.rows()[0].time, "사용 불가");
+  assert.equal(app.rows()[0].official, "공식값 사용 불가");
 });
 
-test("페이지를 떠나면 반납 대기 종료 조회를 예약하지 않습니다", async () => {
-  const app = await createApp([cooldownSeat], 0);
+test("좌석 번호로 검색하면 일치하는 좌석만 표시합니다", async () => {
+  const seats = [
+    { seatNo: "013", remainingMinutes: 5 },
+    { seatNo: 120, remainingMinutes: 3 },
+    { seatNo: 121, remainingMinutes: 4 },
+  ];
+  const app = await createApp(seats);
+  app.filter("13, 121");
+  assert.deepEqual(app.rows().map(({ name }) => name), ["열람실 69 / 121번", "열람실 69 / 013번"]);
+  assert.equal(app.seatCount(), "2/3개");
+  await app.refresh(seats);
+  assert.equal(app.rows().length, 2);
+
+  app.filter("999");
+  assert.equal(app.emptyText(), "검색한 좌석이 없습니다.");
+  app.filter("");
+  assert.equal(app.rows().length, 3);
+  assert.equal(app.seatCount(), "3개");
+});
+
+test("페이지를 떠나면 조회하지 않으며 돌아오면 다시 조회합니다", async () => {
+  const app = await createApp([availableSeat]);
   app.hide();
-  app.tick(30000);
-  await app.flush();
+  await app.refresh([availableSeat]);
   assert.equal(app.requestCount(), 1);
-});
-
-test("페이지를 떠난 뒤 조회가 완료되어도 재조회를 예약하지 않으며 돌아오면 다시 조회합니다", async () => {
-  const app = await createApp([cooldownSeat], 0);
-  const release = app.deferNextRequest();
-  await app.refresh([cooldownSeat]);
-  app.hide();
-  release();
-  await app.flush();
-  app.tick(30000);
-  await app.flush();
-  assert.equal(app.requestCount(), 2);
-  app.setResponse([{ status: "available", remainingMinutes: 0 }]);
   app.show();
   await app.flush();
-  assert.equal(app.requestCount(), 3);
-  assert.equal(app.rows()[0].time, "사용 가능");
+  assert.equal(app.requestCount(), 2);
 });

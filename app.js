@@ -1,7 +1,6 @@
 const STORAGE_KEY = "pnusear-seat-time-settings";
 const DEFAULT_ROOMS = "새벽벌도서관 2층 1열람실, 새벽별당";
 const RETURN_COOLDOWN_MS = 25000;
-const COOLDOWN_RETRY_MS = 5000;
 
 const settingsForm = document.querySelector("#settings-form");
 const roomsInput = document.querySelector("#rooms");
@@ -13,15 +12,14 @@ const authStatus = document.querySelector("#auth-status");
 const watchStatus = document.querySelector("#watch-status");
 const providerStatus = document.querySelector("#provider-status");
 const seatCount = document.querySelector("#seat-count");
+const seatFilterInput = document.querySelector("#seat-filter");
 const seatList = document.querySelector("#seat-list");
 
 let settings = readSettings();
 let latestSeats = [];
 let autoRefreshTimer = null;
 let liveRenderTimer = null;
-let cooldownRefreshTimer = null;
 let isFetchingSeats = false;
-let cooldownRefreshPending = false;
 let isPageActive = true;
 
 function readSettings() {
@@ -76,8 +74,12 @@ function formatRemaining(ms) {
   return `${seconds}초`;
 }
 
+function isCoolingDown(seat) {
+  return Date.parse(seat.cooldownUntil) > Date.now();
+}
+
 function getCurrentRemainingMs(seat) {
-  if (seat.status === "cooldown") {
+  if (isCoolingDown(seat)) {
     return Date.parse(seat.cooldownUntil) - Date.now();
   }
 
@@ -92,7 +94,7 @@ function getCurrentRemainingMs(seat) {
 }
 
 function getSortRemaining(seat) {
-  if (seat.status === "available") {
+  if (seat.status === "available" && !isCoolingDown(seat)) {
     return 0;
   }
 
@@ -100,9 +102,13 @@ function getSortRemaining(seat) {
   return Number.isFinite(remainingMs) ? Math.max(0, remainingMs) : Number.POSITIVE_INFINITY;
 }
 
+function getSeatNumber(seat) {
+  return Number.parseInt(String(seat.seatNo).replace(/\D/g, ""), 10);
+}
+
 function compareSeatNumber(left, right) {
-  const leftNumber = Number.parseInt(String(left.seatNo).replace(/\D/g, ""), 10);
-  const rightNumber = Number.parseInt(String(right.seatNo).replace(/\D/g, ""), 10);
+  const leftNumber = getSeatNumber(left);
+  const rightNumber = getSeatNumber(right);
 
   if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
     return leftNumber - rightNumber;
@@ -136,20 +142,16 @@ function getOfficialRemainingMinutes(seat) {
 }
 
 function getOfficialTimeLabel(seat) {
-  if (seat.status === "cooldown") {
-    return "공식값 예약 불가";
-  }
   if (seat.status === "unavailable") {
     return "공식값 사용 불가";
+  }
+  if (seat.status === "available") {
+    return "공식값 사용 가능";
   }
 
   const remainingMinutes = getOfficialRemainingMinutes(seat);
   if (remainingMinutes !== null) {
     return `공식값 ${remainingMinutes}분`;
-  }
-
-  if (seat.status === "available") {
-    return "공식값 사용 가능";
   }
 
   return "공식값 없음";
@@ -164,24 +166,30 @@ function getFetchedAtLabel(seat) {
   return `조회 ${fetchedAt.toLocaleTimeString("ko-KR")}`;
 }
 
-function renderSeatList() {
-  seatList.replaceChildren();
-  seatCount.textContent = `${latestSeats.length}개`;
+// 쉼표·공백으로 구분한 좌석 번호. "013"과 "13"은 같은 좌석으로 처리함
+function getSeatFilter() {
+  return new Set(seatFilterInput.value.split(/[\s,]+/).filter(Boolean).map(Number).filter(Number.isInteger));
+}
 
-  if (latestSeats.length === 0) {
+function renderSeatList() {
+  const filter = getSeatFilter();
+  const seats = filter.size > 0 ? latestSeats.filter((seat) => filter.has(getSeatNumber(seat))) : latestSeats;
+  seatList.replaceChildren();
+  seatCount.textContent = filter.size > 0 ? `${seats.length}/${latestSeats.length}개` : `${latestSeats.length}개`;
+
+  if (seats.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "표시할 좌석이 없습니다.";
+    empty.textContent = latestSeats.length > 0 ? "검색한 좌석이 없습니다." : "표시할 좌석이 없습니다.";
     seatList.append(empty);
     return;
   }
 
-  for (const seat of [...latestSeats].sort(compareSeats)) {
+  for (const seat of [...seats].sort(compareSeats)) {
     const remainingMs = getCurrentRemainingMs(seat);
-    const isAvailable = seat.status === "available";
-    const isCooldown = seat.status === "cooldown";
+    const isCooldown = isCoolingDown(seat);
+    const isAvailable = seat.status === "available" && !isCooldown;
     const isUnavailable = seat.status === "unavailable";
-    const cooldownFinished = isCooldown && remainingMs <= 0;
 
     const row = document.createElement("div");
     row.className = `seat-row ${isAvailable ? "available" : isCooldown ? "cooldown" : isUnavailable ? "unavailable" : ""}`;
@@ -195,7 +203,7 @@ function renderSeatList() {
 
     const detail = document.createElement("div");
     detail.className = "seat-detail";
-    const statusLabel = cooldownFinished ? "예약 가능 확인 중" : seat.statusLabel ?? "조회됨";
+    const statusLabel = isCooldown ? "반납 후 대기" : seat.statusLabel ?? "조회됨";
     detail.textContent = [statusLabel, getFetchedAtLabel(seat)].filter(Boolean).join(" · ");
 
     const time = document.createElement("div");
@@ -205,7 +213,7 @@ function renderSeatList() {
     remaining.textContent = isAvailable
       ? "사용 가능"
       : isCooldown
-        ? cooldownFinished ? "예약 가능 확인 중" : `${formatRemaining(remainingMs)} 후 사용 가능 예상`
+        ? `${formatRemaining(remainingMs)} 후 사용 가능 예상`
         : isUnavailable ? "사용 불가" : formatRemaining(remainingMs);
 
     const official = document.createElement("span");
@@ -242,11 +250,12 @@ function reconcileSeats(nextSeats) {
 
   return nextSeats.map((seat) => {
     const previousSeat = previousSeats.get(getSeatKey(seat));
-    if (seat.status === "cooldown") {
-      const cooldownUntil = previousSeat?.status === "cooldown" && Number.isFinite(Date.parse(previousSeat.cooldownUntil))
-        ? previousSeat.cooldownUntil
-        : new Date(Date.now() + RETURN_COOLDOWN_MS).toISOString();
-      return { ...seat, cooldownUntil };
+    if (seat.status === "available") {
+      // 반납 대기는 이 화면에서 사용 중 → 사용 가능 전환을 확인한 좌석에만 적용함
+      const cooldownUntil = previousSeat?.status === "occupied"
+        ? new Date(Date.now() + RETURN_COOLDOWN_MS).toISOString()
+        : previousSeat?.cooldownUntil;
+      return cooldownUntil ? { ...seat, cooldownUntil } : seat;
     }
 
     const remainingMinutes = getOfficialRemainingMinutes(seat);
@@ -287,39 +296,7 @@ async function fetchSeats() {
   } finally {
     isFetchingSeats = false;
     refreshButton.disabled = false;
-    scheduleCooldownRefresh();
-    if (cooldownRefreshPending && isPageActive) {
-      cooldownRefreshPending = false;
-      fetchSeats();
-    }
   }
-}
-
-function scheduleCooldownRefresh() {
-  window.clearTimeout(cooldownRefreshTimer);
-  cooldownRefreshTimer = null;
-  if (!isPageActive) {
-    return;
-  }
-
-  const delays = latestSeats
-    .filter((seat) => seat.status === "cooldown")
-    .map((seat) => getCurrentRemainingMs(seat))
-    .filter(Number.isFinite)
-    .map((remainingMs) => remainingMs > 0 ? remainingMs : COOLDOWN_RETRY_MS);
-  if (delays.length === 0) {
-    return;
-  }
-
-  cooldownRefreshTimer = window.setTimeout(() => {
-    cooldownRefreshTimer = null;
-    renderSeatList();
-    if (isFetchingSeats) {
-      cooldownRefreshPending = true;
-    } else {
-      fetchSeats();
-    }
-  }, Math.min(...delays));
 }
 
 function scheduleAutoRefresh() {
@@ -345,6 +322,8 @@ settingsForm.addEventListener("submit", (event) => {
 refreshButton.addEventListener("click", () => {
   fetchSeats();
 });
+
+seatFilterInput.addEventListener("input", renderSeatList);
 
 refreshIntervalInput.addEventListener("change", () => {
   saveSettings({
@@ -387,10 +366,8 @@ liveRenderTimer = window.setInterval(renderSeatList, 1000);
 
 window.addEventListener("pagehide", () => {
   isPageActive = false;
-  cooldownRefreshPending = false;
   window.clearInterval(autoRefreshTimer);
   window.clearInterval(liveRenderTimer);
-  window.clearTimeout(cooldownRefreshTimer);
 });
 
 window.addEventListener("pageshow", () => {
