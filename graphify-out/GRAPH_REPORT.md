@@ -1,16 +1,16 @@
 # Graph Report - _pnu_seat  (2026-10-15)
 
 ## Corpus Check
-- 9 files · ~5,762 words
+- 9 files · ~6,113 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 145 nodes · 194 edges · 12 communities
+- 144 nodes · 190 edges · 9 communities
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 4 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `ce8a9c28`
+- Built from commit: `dbf5865f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -24,13 +24,10 @@
 - PNUL Seat API Notes
 - import-pnul-headers.js
 - server.test.js
-- renderSeatList
-- fetchSeats
-- reconcileSeats
 
 ## God Nodes (most connected - your core abstractions)
 1. `PNUSear` - 14 edges
-2. `renderSeatList()` - 10 edges
+2. `renderSeatList()` - 9 edges
 3. `routeApi()` - 8 edges
 4. `PNUL Seat API Notes` - 8 edges
 5. `listSeats()` - 7 edges
@@ -41,25 +38,20 @@
 10. `normalizePnulSeat()` - 5 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `renderSeatList()` --calls--> `getOfficialTimeLabel()`  [EXTRACTED]
-  app.js → app.js  _Bridges community 11 → community 9_
-- `fetchSeats()` --calls--> `renderSeatList()`  [EXTRACTED]
-  app.js → app.js  _Bridges community 9 → community 10_
-- `fetchSeats()` --calls--> `reconcileSeats()`  [EXTRACTED]
-  app.js → app.js  _Bridges community 11 → community 10_
+- None detected - all connections are within the same source files.
 
 ## Import Cycles
 - None detected.
 
-## Communities (12 total, 0 thin omitted)
+## Communities (9 total, 0 thin omitted)
 
 ### Community 0 - "server.js"
 Cohesion: 0.12
 Nodes (31): EXCLUDED_SEATS, extractHeader(), findTimeValue(), firstDefined(), fs, getCookieNames(), getCookieValue(), getPnulAuthToken() (+23 more)
 
 ### Community 1 - "app.js"
-Cohesion: 0.11
-Nodes (14): authForm, authStatus, headersTextInput, latestSeats, providerStatus, refreshButton, refreshIntervalInput, roomsInput (+6 more)
+Cohesion: 0.09
+Nodes (32): authForm, authStatus, compareSeatNumber(), compareSeats(), fetchSeats(), formatRemaining(), getFetchedAtLabel(), getOfficialRemainingMinutes() (+24 more)
 
 ### Community 2 - "probe-pnul.js"
 Cohesion: 0.20
@@ -89,18 +81,6 @@ Nodes (7): authToken, cookie, extractHeader(), fs, path, privateDir, readNextVal
 Cohesion: 0.22
 Nodes (7): assert, context, fetchedAt, fs, path, { test }, vm
 
-### Community 9 - "renderSeatList"
-Cohesion: 0.29
-Nodes (10): compareSeatNumber(), compareSeats(), formatRemaining(), getCurrentRemainingMs(), getFetchedAtLabel(), getSeatFilter(), getSeatNumber(), getSortRemaining() (+2 more)
-
-### Community 10 - "fetchSeats"
-Cohesion: 0.40
-Nodes (5): fetchSeats(), getRoomsValue(), loadProviderStatus(), requestJson(), scheduleAutoRefresh()
-
-### Community 11 - "reconcileSeats"
-Cohesion: 0.50
-Nodes (4): getOfficialRemainingMinutes(), getOfficialTimeLabel(), getSeatKey(), reconcileSeats()
-
 ## Knowledge Gaps
 - **71 isolated node(s):** `settingsForm`, `roomsInput`, `refreshIntervalInput`, `refreshButton`, `authForm` (+66 more)
   These have ≤1 connection - possible missing edges or undocumented components.
@@ -117,6 +97,6 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `server.js` be split into smaller, more focused modules?**
   _Cohesion score 0.11693548387096774 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.1111111111111111 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0873015873015873 - nodes in this community are weakly interconnected._
 - **Should `PNUSear` be split into smaller, more focused modules?**
   _Cohesion score 0.14285714285714285 - nodes in this community are weakly interconnected._

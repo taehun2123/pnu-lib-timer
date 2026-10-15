@@ -1,6 +1,6 @@
 const STORAGE_KEY = "pnusear-seat-time-settings";
 const DEFAULT_ROOMS = "새벽벌도서관 2층 1열람실, 새벽별당";
-const RETURN_COOLDOWN_MS = 25000;
+const RETURN_COOLDOWN_MS = 20000;
 
 const settingsForm = document.querySelector("#settings-form");
 const roomsInput = document.querySelector("#rooms");
@@ -74,32 +74,29 @@ function formatRemaining(ms) {
   return `${seconds}초`;
 }
 
-function isCoolingDown(seat) {
-  return Date.parse(seat.cooldownUntil) > Date.now();
-}
-
-function getCurrentRemainingMs(seat) {
-  if (isCoolingDown(seat)) {
-    return Date.parse(seat.cooldownUntil) - Date.now();
+// 사용 중 좌석은 0초 도달 즉시 반납 대기로 전환함. API가 빈 좌석으로 응답할 때까지 대기 시간은 0초에서 정지함
+function getSeatPhase(seat) {
+  const now = Date.now();
+  const expiresAt = Date.parse(seat.expiresAt);
+  if (seat.status === "occupied" && expiresAt <= now) {
+    return { phase: "cooldown", ms: Math.max(0, expiresAt + RETURN_COOLDOWN_MS - now) };
+  }
+  if (seat.status === "available") {
+    const cooldownMs = Date.parse(seat.cooldownUntil) - now;
+    return cooldownMs > 0 ? { phase: "cooldown", ms: cooldownMs } : { phase: "available", ms: 0 };
   }
 
-  if (seat.expiresAt) {
-    const expiresAt = new Date(seat.expiresAt).getTime();
-    if (Number.isFinite(expiresAt)) {
-      return expiresAt - Date.now();
-    }
-  }
-
-  return seat.remainingMs;
+  return { phase: seat.status, ms: Number.isFinite(expiresAt) ? expiresAt - now : seat.remainingMs };
 }
 
+// 사용 가능까지 남은 시간 기준. 사용 중 좌석은 반납 대기 시간을 더함
 function getSortRemaining(seat) {
-  if (seat.status === "available" && !isCoolingDown(seat)) {
-    return 0;
+  const { phase, ms } = getSeatPhase(seat);
+  if (!Number.isFinite(ms)) {
+    return Number.POSITIVE_INFINITY;
   }
 
-  const remainingMs = getCurrentRemainingMs(seat);
-  return Number.isFinite(remainingMs) ? Math.max(0, remainingMs) : Number.POSITIVE_INFINITY;
+  return Math.max(0, phase === "occupied" ? ms + RETURN_COOLDOWN_MS : ms);
 }
 
 function getSeatNumber(seat) {
@@ -186,10 +183,10 @@ function renderSeatList() {
   }
 
   for (const seat of [...seats].sort(compareSeats)) {
-    const remainingMs = getCurrentRemainingMs(seat);
-    const isCooldown = isCoolingDown(seat);
-    const isAvailable = seat.status === "available" && !isCooldown;
-    const isUnavailable = seat.status === "unavailable";
+    const { phase, ms: remainingMs } = getSeatPhase(seat);
+    const isAvailable = phase === "available";
+    const isCooldown = phase === "cooldown";
+    const isUnavailable = phase === "unavailable";
 
     const row = document.createElement("div");
     row.className = `seat-row ${isAvailable ? "available" : isCooldown ? "cooldown" : isUnavailable ? "unavailable" : ""}`;
@@ -251,22 +248,23 @@ function reconcileSeats(nextSeats) {
   return nextSeats.map((seat) => {
     const previousSeat = previousSeats.get(getSeatKey(seat));
     if (seat.status === "available") {
-      // 반납 대기는 이 화면에서 사용 중 → 사용 가능 전환을 확인한 좌석에만 적용함
+      // 반납 대기는 사용 시간이 0초에 도달한 좌석에만 이어서 적용함. 중도 반납 좌석은 바로 사용 가능
+      const previousExpiresAt = Date.parse(previousSeat?.expiresAt);
       const cooldownUntil = previousSeat?.status === "occupied"
-        ? new Date(Date.now() + RETURN_COOLDOWN_MS).toISOString()
+        ? previousExpiresAt <= Date.now() && new Date(previousExpiresAt + RETURN_COOLDOWN_MS).toISOString()
         : previousSeat?.cooldownUntil;
       return cooldownUntil ? { ...seat, cooldownUntil } : seat;
     }
 
     const remainingMinutes = getOfficialRemainingMinutes(seat);
-    if (
-      !previousSeat ||
-      seat.status !== previousSeat.status ||
-      remainingMinutes === null ||
-      remainingMinutes !== getOfficialRemainingMinutes(previousSeat) ||
-      !previousSeat.expiresAt ||
-      !Number.isFinite(Date.parse(previousSeat.expiresAt))
-    ) {
+    if (!previousSeat || seat.status !== previousSeat.status || remainingMinutes === null) {
+      return seat;
+    }
+
+    // 공식 분 값이 같거나 감소하면 더 이른 종료 시각을 사용함. 1분 → 0분 응답에도 반납 대기 타이머가 다시 시작되지 않음
+    const previousMinutes = getOfficialRemainingMinutes(previousSeat);
+    const previousExpiresAt = Date.parse(previousSeat.expiresAt);
+    if (previousMinutes === null || remainingMinutes > previousMinutes || !(previousExpiresAt < Date.parse(seat.expiresAt))) {
       return seat;
     }
 

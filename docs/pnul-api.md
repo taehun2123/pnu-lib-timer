@@ -92,7 +92,7 @@ GET /pyxis-api/1/api/rooms/{roomId}/seats/{seatId}?hopeBeginTime=YYYY-MM-DD%20HH
 
 서버 응답의 좌석 `status`에는 `occupied`, `available`, `unavailable`, `unknown`을 사용합니다. `unavailable`에서는 사용 시간용 `expiresAt`, `remainingMs`가 `null`입니다. `raw`에는 상태 확인을 위해 `isActive`, `isUnavailable`, `isDisabled`, `isReservable`, `seatChargeState`도 포함합니다.
 
-조회한 응답의 `timeLine`은 `null`이며 반납 시각은 확인되지 않았습니다. 반납 후 25초 대기는 서버가 판단하지 않습니다. 화면이 사용 중 좌석의 사용 가능 전환을 확인한 시점부터 추정하며, 표시 기준은 [README의 반납 후 대기](../README.md#반납-후-대기)가 기준입니다.
+조회한 응답의 `timeLine`은 `null`이며 반납 시각은 확인되지 않았습니다. 반납 후 20초 대기는 서버가 판단하지 않습니다. 화면이 사용 중 좌석의 추정 남은 시간이 0초에 도달한 시점부터 계산하며, 표시 기준은 [README의 반납 후 대기](../README.md#반납-후-대기)가 기준입니다.
 
 ## 예약 요청 형식
 

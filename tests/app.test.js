@@ -197,12 +197,12 @@ test("공식값이 없거나 유효하지 않으면 최신 응답의 시간을 �
   }
 });
 
-test("초 단위 타이머가 끝나도 공식 분 값이 같으면 다시 시작하지 않습니다", async () => {
+test("공식 분 값이 감소해도 진행 중인 반납 대기 타이머를 다시 시작하지 않습니다", async () => {
   const app = await createApp([{ remainingMinutes: 1 }]);
   await app.refresh([{ remainingMinutes: 1 }], 70000);
-  assert.equal(app.rows()[0].time, "0초");
+  assert.equal(app.rows()[0].time, "10초 후 사용 가능 예상");
   await app.refresh([{ remainingMinutes: 0 }]);
-  assert.equal(app.rows()[0].time, "0초");
+  assert.equal(app.rows()[0].time, "0초 후 사용 가능 예상");
   assert.equal(app.rows()[0].official, "공식값 0분");
   await app.refresh([{ remainingMinutes: 2 }]);
   assert.equal(app.rows()[0].time, "2분 00초");
@@ -219,36 +219,66 @@ test("처음 조회한 빈 좌석은 반납 대기 없이 사용 가능으로 �
   assert.equal(app.rows()[0].time, "사용 가능");
 });
 
-test("사용 중 좌석이 비면 25초 반납 대기 후 사용 가능으로 바뀝니다", async () => {
-  const app = await createApp([{ remainingMinutes: 5 }], 0);
-  await app.refresh([availableSeat]);
-  assert.equal(app.rows()[0].time, "25초 후 사용 가능 예상");
+test("사용 시간이 0초가 되면 곧바로 20초 반납 대기 타이머를 표시합니다", async () => {
+  const app = await createApp([{ remainingMinutes: 1 }], 0);
+  app.tick(59000);
+  assert.equal(app.rows()[0].time, "1초");
+  app.tick(1000);
+  assert.equal(app.rows()[0].time, "20초 후 사용 가능 예상");
   assert.match(app.rows()[0].detail, /^반납 후 대기 · /);
   assert.equal(app.rows()[0].className, "seat-row cooldown");
-  await app.refresh([availableSeat]);
-  assert.equal(app.rows()[0].time, "15초 후 사용 가능 예상");
-
   app.tick(15000);
+  assert.equal(app.rows()[0].time, "5초 후 사용 가능 예상");
+
+  app.tick(10000);
+  assert.equal(app.rows()[0].time, "0초 후 사용 가능 예상");
+  assert.equal(app.requestCount(), 1);
+  await app.refresh([availableSeat], 0);
   assert.equal(app.rows()[0].time, "사용 가능");
   assert.equal(app.rows()[0].className, "seat-row available");
+});
+
+test("반납 대기 중 API가 빈 좌석으로 바뀌어도 남은 대기 시간을 이어갑니다", async () => {
+  const app = await createApp([{ remainingMinutes: 1 }], 0);
+  app.tick(65000);
+  assert.equal(app.rows()[0].time, "15초 후 사용 가능 예상");
+  await app.refresh([availableSeat]);
+  assert.equal(app.rows()[0].time, "5초 후 사용 가능 예상");
+  assert.equal(app.rows()[0].official, "공식값 사용 가능");
+  app.tick(5000);
+  assert.equal(app.rows()[0].time, "사용 가능");
+});
+
+test("사용 시간이 남은 상태에서 반납된 좌석은 바로 사용 가능으로 표시합니다", async () => {
+  const app = await createApp([{ remainingMinutes: 5 }], 0);
   await app.refresh([availableSeat]);
   assert.equal(app.rows()[0].time, "사용 가능");
-  assert.equal(app.requestCount(), 4);
+  assert.equal(app.rows()[0].className, "seat-row available");
 });
 
 test("반납 대기 중 다른 사용자가 좌석을 사용하면 사용 시간으로 바뀝니다", async () => {
-  const app = await createApp([{ remainingMinutes: 5 }], 0);
+  const app = await createApp([{ remainingMinutes: 1 }], 0);
+  app.tick(65000);
   await app.refresh([availableSeat]);
   await app.refresh([{ remainingMinutes: 10 }]);
   assert.equal(app.rows()[0].time, "10분 00초");
 });
 
 test("조회가 실패해도 반납 대기 타이머는 초기화되지 않습니다", async () => {
-  const app = await createApp([{ remainingMinutes: 5 }], 0);
-  await app.refresh([availableSeat]);
+  const app = await createApp([{ remainingMinutes: 1 }], 0);
+  app.tick(65000);
   app.failNextRequest();
   await app.refresh([availableSeat]);
-  assert.equal(app.rows()[0].time, "15초 후 사용 가능 예상");
+  assert.equal(app.rows()[0].time, "5초 후 사용 가능 예상");
+});
+
+test("사용 가능까지 남은 시간이 짧은 좌석을 먼저 표시합니다", async () => {
+  const app = await createApp([{ seatNo: 120, durationMs: 18000 }, { seatNo: 121, durationMs: 10000 }], 0);
+  app.tick(20000);
+  assert.deepEqual(app.rows().map(({ name, time }) => [name, time]), [
+    ["열람실 69 / 121번", "10초 후 사용 가능 예상"],
+    ["열람실 69 / 120번", "18초 후 사용 가능 예상"],
+  ]);
 });
 
 test("사용 불가 좌석은 사용 불가로 표시합니다", async () => {
